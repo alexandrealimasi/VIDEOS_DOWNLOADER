@@ -9,14 +9,13 @@ import {
   Play,
   Film,
   Music,
-  CheckCircle2,
   AlertTriangle,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Progress } from '../components/ui/progress';
 import { Badge } from '../components/ui/badge';
 import { useAppStore } from '../stores/app-store';
-import type { DownloadJob, DownloadStatus } from '../types';
+import type { DownloadJob } from '../types';
 
 type FilterTab = 'all' | 'active' | 'queued' | 'completed' | 'failed';
 
