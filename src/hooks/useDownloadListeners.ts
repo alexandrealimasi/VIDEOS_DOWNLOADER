@@ -1,17 +1,13 @@
 import { useEffect } from 'react';
 import { useAppStore } from '../stores/app-store';
-import type { DownloadJob } from '../types';
+import type { DownloadJob, HistoryItem } from '../types';
 
 export function useDownloadListeners() {
-  const updateDownload = useAppStore((s) => s.updateDownload);
-  const addDownload = useAppStore((s) => s.addDownload);
-  const downloads = useAppStore((s) => s.downloads);
-  const addHistoryItem = useAppStore((s) => s.addHistoryItem);
-
   useEffect(() => {
     const unsubProgress = window.electronAPI.onDownloadProgress((data) => {
       const job = data as unknown as DownloadJob;
-      const exists = downloads.find((d) => d.id === job.id);
+      const { downloads, updateDownload, addDownload } = useAppStore.getState();
+      const exists = downloads.some((d) => d.id === job.id);
       if (exists) {
         updateDownload(job);
       } else {
@@ -20,6 +16,7 @@ export function useDownloadListeners() {
     });
 
     const unsubComplete = window.electronAPI.onDownloadComplete((data) => {
+      const { updateDownload, downloads, addHistoryItem } = useAppStore.getState();
       updateDownload({
         id: data.id,
         status: 'completed',
@@ -31,7 +28,7 @@ export function useDownloadListeners() {
       // Add to history
       const job = downloads.find((d) => d.id === data.id);
       if (job) {
-        addHistoryItem({
+        const item: HistoryItem = {
           id: job.id,
           url: job.url,
           title: data.title || job.title,
@@ -43,27 +40,16 @@ export function useDownloadListeners() {
           status: 'completed',
           completedAt: new Date().toISOString(),
           downloadedAt: job.createdAt,
-        });
+        };
+        addHistoryItem(item);
 
         // Persist to main process
-        window.electronAPI.addHistoryItem({
-          id: job.id,
-          url: job.url,
-          title: data.title || job.title,
-          thumbnail: job.thumbnail,
-          format: job.format,
-          quality: job.quality,
-          fileSize: data.fileSize,
-          filePath: data.filePath,
-          status: 'completed',
-          completedAt: new Date().toISOString(),
-          downloadedAt: job.createdAt,
-        });
+        window.electronAPI.addHistoryItem(item);
       }
     });
 
     const unsubError = window.electronAPI.onDownloadError((data) => {
-      updateDownload({
+      useAppStore.getState().updateDownload({
         id: data.id,
         status: 'failed',
         error: data.error,
@@ -75,7 +61,5 @@ export function useDownloadListeners() {
       unsubComplete();
       unsubError();
     };
-  // We intentionally exclude downloads from deps to avoid re-subscribing on every update
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }

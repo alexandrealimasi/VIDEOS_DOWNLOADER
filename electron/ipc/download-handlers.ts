@@ -55,6 +55,15 @@ export function registerDownloadHandlers(_mainWindow: BrowserWindow) {
     return { id: job.id };
   });
 
+  ipcMain.handle('remove-download', async (_event, id: string) => {
+    if (typeof id !== 'string') throw new Error('Invalid ID');
+    downloaderService.removeJob(id);
+  });
+
+  ipcMain.handle('clear-completed-downloads', async () => {
+    downloaderService.clearCompleted();
+  });
+
   ipcMain.handle('get-active-downloads', async () => {
     return downloaderService.getActiveDownloads();
   });

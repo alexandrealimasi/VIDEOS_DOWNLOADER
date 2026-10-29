@@ -20,6 +20,7 @@ interface AppState {
   updateDownload: (job: Partial<DownloadJob> & { id: string }) => void;
   addDownload: (job: DownloadJob) => void;
   removeDownload: (id: string) => void;
+  clearCompletedDownloads: () => void;
 
   // History
   history: HistoryItem[];
@@ -59,17 +60,45 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Downloads
   downloads: [],
-  setDownloads: (downloads) => set({ downloads }),
-  updateDownload: (job) => set((state) => ({
-    downloads: state.downloads.map((d) =>
-      d.id === job.id ? { ...d, ...job } : d
-    ),
-  })),
-  addDownload: (job) => set((state) => ({
-    downloads: [job, ...state.downloads],
-  })),
+  setDownloads: (downloads) => set({
+    downloads: downloads.reduce<DownloadJob[]>((acc, job) => {
+      if (!acc.some((j) => j.id === job.id)) {
+        acc.push(job);
+      }
+      return acc;
+    }, []),
+  }),
+  updateDownload: (job) => set((state) => {
+    const exists = state.downloads.some((d) => d.id === job.id);
+    if (!exists) {
+      return {
+        downloads: [job as DownloadJob, ...state.downloads],
+      };
+    }
+    return {
+      downloads: state.downloads.map((d) =>
+        d.id === job.id ? { ...d, ...job } : d
+      ),
+    };
+  }),
+  addDownload: (job) => set((state) => {
+    const existingIndex = state.downloads.findIndex((d) => d.id === job.id);
+    if (existingIndex >= 0) {
+      const updated = [...state.downloads];
+      updated[existingIndex] = { ...updated[existingIndex], ...job };
+      return { downloads: updated };
+    }
+    return {
+      downloads: [job, ...state.downloads],
+    };
+  }),
   removeDownload: (id) => set((state) => ({
     downloads: state.downloads.filter((d) => d.id !== id),
+  })),
+  clearCompletedDownloads: () => set((state) => ({
+    downloads: state.downloads.filter(
+      (d) => d.status === 'downloading' || d.status === 'processing' || d.status === 'queued'
+    ),
   })),
 
   // History

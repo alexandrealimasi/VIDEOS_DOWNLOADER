@@ -9,6 +9,8 @@ export interface ElectronAPI {
   resumeDownload: (id: string) => Promise<void>;
   cancelDownload: (id: string) => Promise<void>;
   retryDownload: (id: string) => Promise<void>;
+  removeDownload: (id: string) => Promise<void>;
+  clearCompletedDownloads: () => Promise<void>;
   getActiveDownloads: () => Promise<DownloadJob[]>;
   onDownloadProgress: (callback: (data: DownloadJob) => void) => () => void;
   onDownloadComplete: (callback: (data: { id: string; filePath: string; fileSize: number; title: string }) => void) => () => void;

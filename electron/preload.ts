@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resumeDownload: (id: string) => ipcRenderer.invoke('resume-download', id),
   cancelDownload: (id: string) => ipcRenderer.invoke('cancel-download', id),
   retryDownload: (id: string) => ipcRenderer.invoke('retry-download', id),
+  removeDownload: (id: string) => ipcRenderer.invoke('remove-download', id),
+  clearCompletedDownloads: () => ipcRenderer.invoke('clear-completed-downloads'),
   getActiveDownloads: () => ipcRenderer.invoke('get-active-downloads'),
 
   // Download progress events - returns unsubscribe function

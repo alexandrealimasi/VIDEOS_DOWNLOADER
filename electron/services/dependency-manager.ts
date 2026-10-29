@@ -114,6 +114,14 @@ export function getFfmpegPath(): string {
   return localPath || 'ffmpeg';
 }
 
+export function getFfmpegLocation(): string | null {
+  const localPath = findExecutable('ffmpeg');
+  if (localPath) {
+    return path.dirname(localPath);
+  }
+  return null;
+}
+
 export function getInstallInstructions(name: string): string {
   if (name === 'yt-dlp') {
     return [

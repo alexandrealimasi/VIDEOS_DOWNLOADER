@@ -100,7 +100,7 @@ export const Home: React.FC = () => {
   };
 
   const handleStartDownload = async () => {
-    if (!mediaInfo) return;
+    if (!mediaInfo || downloadStarting) return;
 
     setDownloadStarting(true);
     setDownloadSuccessMessage(null);
@@ -288,7 +288,18 @@ export const Home: React.FC = () => {
                 <div className="flex rounded-lg border border-border p-1 bg-background">
                   <button
                     type="button"
-                    onClick={() => setAudioOnly(false)}
+                    onClick={() => {
+                      setAudioOnly(false);
+                      if (mediaInfo) {
+                        if (mediaInfo.bestFormat) {
+                          setSelectedFormatId(mediaInfo.bestFormat.formatId);
+                          setSelectedQuality(mediaInfo.bestFormat.quality);
+                        } else if (mediaInfo.formats && mediaInfo.formats.length > 0) {
+                          setSelectedFormatId(mediaInfo.formats[0].formatId);
+                          setSelectedQuality(mediaInfo.formats[0].quality);
+                        }
+                      }
+                    }}
                     className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
                       !audioOnly ? 'bg-accent text-white' : 'text-gray-400 hover:text-white'
                     }`}
@@ -297,7 +308,16 @@ export const Home: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAudioOnly(true)}
+                    onClick={() => {
+                      setAudioOnly(true);
+                      if (mediaInfo?.audioFormats && mediaInfo.audioFormats.length > 0) {
+                        setSelectedFormatId(mediaInfo.audioFormats[0].formatId);
+                        setSelectedQuality(mediaInfo.audioFormats[0].quality || 'MP3 Audio');
+                      } else {
+                        setSelectedFormatId('best');
+                        setSelectedQuality('MP3 Audio');
+                      }
+                    }}
                     className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
                       audioOnly ? 'bg-accent text-white' : 'text-gray-400 hover:text-white'
                     }`}
@@ -336,10 +356,14 @@ export const Home: React.FC = () => {
                     <Select
                       options={audioOptions}
                       value={selectedFormatId}
-                      onChange={(e) => setSelectedFormatId(e.target.value)}
+                      onChange={(e) => {
+                        setSelectedFormatId(e.target.value);
+                        const match = mediaInfo.audioFormats.find((f: MediaFormat) => f.formatId === e.target.value);
+                        if (match) setSelectedQuality(match.quality || 'MP3 Audio');
+                      }}
                     />
                   ) : (
-                    <p className="text-xs text-gray-500">Best available audio stream</p>
+                    <p className="text-xs text-gray-500">Best available audio stream (MP3)</p>
                   )}
                 </div>
               )}
@@ -369,6 +393,7 @@ export const Home: React.FC = () => {
                   className="w-full py-6 text-base font-semibold shadow-lg shadow-accent/20"
                   onClick={handleStartDownload}
                   loading={downloadStarting}
+                  disabled={downloadStarting || isAnalyzing}
                 >
                   <Download className="h-5 w-5" />
                   Start Download

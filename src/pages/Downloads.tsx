@@ -10,6 +10,7 @@ import {
   Film,
   Music,
   AlertTriangle,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Progress } from '../components/ui/progress';
@@ -21,6 +22,8 @@ type FilterTab = 'all' | 'active' | 'queued' | 'completed' | 'failed';
 
 export const Downloads: React.FC = () => {
   const downloads = useAppStore((s) => s.downloads);
+  const removeDownload = useAppStore((s) => s.removeDownload);
+  const clearCompletedDownloads = useAppStore((s) => s.clearCompletedDownloads);
   const [currentTab, setCurrentTab] = useState<FilterTab>('all');
 
   const filteredDownloads = downloads.filter((d) => {
@@ -31,6 +34,15 @@ export const Downloads: React.FC = () => {
     if (currentTab === 'failed') return d.status === 'failed' || d.status === 'cancelled';
     return true;
   });
+
+  // Guarantee strict uniqueness by job id to avoid any duplicate rendering
+  const uniqueDownloads = Array.from(
+    new Map(filteredDownloads.map((job) => [job.id, job])).values()
+  );
+
+  const hasFinished = downloads.some(
+    (d) => d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled'
+  );
 
   const handlePause = async (id: string) => {
     try {
@@ -58,9 +70,28 @@ export const Downloads: React.FC = () => {
 
   const handleRetry = async (id: string) => {
     try {
+      removeDownload(id);
       await window.electronAPI.retryDownload(id);
     } catch (err) {
       console.error('Failed to retry download:', err);
+    }
+  };
+
+  const handleRemove = async (id: string) => {
+    try {
+      removeDownload(id);
+      await window.electronAPI.removeDownload(id);
+    } catch (err) {
+      console.error('Failed to remove download:', err);
+    }
+  };
+
+  const handleClearCompleted = async () => {
+    try {
+      clearCompletedDownloads();
+      await window.electronAPI.clearCompletedDownloads();
+    } catch (err) {
+      console.error('Failed to clear completed downloads:', err);
     }
   };
 
@@ -93,26 +124,41 @@ export const Downloads: React.FC = () => {
           </p>
         </div>
 
-        {/* Tab Filters */}
-        <div className="flex rounded-lg border border-border p-1 bg-background-card">
-          {(['all', 'active', 'queued', 'completed', 'failed'] as FilterTab[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setCurrentTab(tab)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-all ${
-                currentTab === tab
-                  ? 'bg-accent text-white shadow-sm'
-                  : 'text-gray-400 hover:text-white'
-              }`}
+        <div className="flex items-center gap-3">
+          {hasFinished && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClearCompleted}
+              className="text-xs text-gray-400 hover:text-red-400 border-border"
+              title="Clear all completed and failed downloads"
             >
-              {tab}
-            </button>
-          ))}
+              <Trash2 className="h-3.5 w-3.5 mr-1" />
+              Clear Finished
+            </Button>
+          )}
+
+          {/* Tab Filters */}
+          <div className="flex rounded-lg border border-border p-1 bg-background-card">
+            {(['all', 'active', 'queued', 'completed', 'failed'] as FilterTab[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setCurrentTab(tab)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-all ${
+                  currentTab === tab
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Downloads List */}
-      {filteredDownloads.length === 0 ? (
+      {uniqueDownloads.length === 0 ? (
         <div className="bg-background-card border border-border rounded-xl p-12 text-center space-y-3">
           <Download className="h-10 w-10 text-gray-600 mx-auto" />
           <h3 className="text-base font-semibold text-gray-300">No downloads found</h3>
@@ -124,7 +170,7 @@ export const Downloads: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredDownloads.map((job: DownloadJob) => {
+          {uniqueDownloads.map((job: DownloadJob) => {
             const isProcessing = job.status === 'processing';
             const isDownloading = job.status === 'downloading';
             const isCompleted = job.status === 'completed';
@@ -280,6 +326,19 @@ export const Downloads: React.FC = () => {
                           Open Folder
                         </Button>
                       </>
+                    )}
+
+                    {/* Remove/Dismiss button for finished items */}
+                    {(isCompleted || isFailed) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemove(job.id)}
+                        className="text-gray-400 hover:text-red-400"
+                        title="Remove from list"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     )}
                   </div>
                 </div>
