@@ -7,7 +7,17 @@ import { registerMediaHandlers } from './ipc/media-handlers';
 import { registerSettingsHandlers } from './ipc/settings-handlers';
 import { registerHistoryHandlers } from './ipc/history-handlers';
 import { registerDependencyHandlers } from './ipc/dependency-handlers';
+import { registerFfmpegHandlers } from './ipc/ffmpeg-handlers';
 import { downloaderService } from './services/downloader';
+
+// Register custom protocol for direct downloading from browser/extension
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('videograbber', process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient('videograbber');
+}
 
 // Handle single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -16,8 +26,33 @@ if (!gotTheLock) {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let pendingExternalUrl: string | null = null;
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+
+function extractUrlFromProtocol(args: string[]): string | null {
+  for (const arg of args) {
+    if (arg.startsWith('videograbber://')) {
+      try {
+        const parsed = new URL(arg);
+        const urlParam = parsed.searchParams.get('url');
+        if (urlParam) return decodeURIComponent(urlParam);
+        const direct = arg.replace(/^videograbber:\/\/(download\?url=)?/, '');
+        if (direct) return decodeURIComponent(direct);
+      } catch {
+        const match = arg.match(/url=([^&]+)/);
+        if (match) return decodeURIComponent(match[1]);
+      }
+    }
+  }
+  return null;
+}
+
+// Extract any initial protocol URL
+const initialUrl = extractUrlFromProtocol(process.argv);
+if (initialUrl) {
+  pendingExternalUrl = initialUrl;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -76,6 +111,7 @@ function createWindow() {
   registerSettingsHandlers(mainWindow);
   registerHistoryHandlers();
   registerDependencyHandlers();
+  registerFfmpegHandlers(mainWindow);
 
   // Load app
   if (isDev) {
@@ -86,6 +122,10 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
+    if (pendingExternalUrl && mainWindow) {
+      mainWindow.webContents.send('external-url-received', pendingExternalUrl);
+      pendingExternalUrl = null;
+    }
   });
 
   if (isDev) {
@@ -99,10 +139,28 @@ function createWindow() {
 
 app.on('ready', createWindow);
 
-app.on('second-instance', () => {
+app.on('second-instance', (_event, commandLine) => {
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
+
+    const externalUrl = extractUrlFromProtocol(commandLine);
+    if (externalUrl) {
+      mainWindow.webContents.send('external-url-received', externalUrl);
+    }
+  }
+});
+
+// macOS open-url event
+app.on('open-url', (event, urlStr) => {
+  event.preventDefault();
+  const externalUrl = extractUrlFromProtocol([urlStr]);
+  if (externalUrl) {
+    if (mainWindow) {
+      mainWindow.webContents.send('external-url-received', externalUrl);
+    } else {
+      pendingExternalUrl = externalUrl;
+    }
   }
 });
 

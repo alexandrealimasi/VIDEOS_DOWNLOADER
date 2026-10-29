@@ -2,10 +2,10 @@
 
 import { spawn } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
-import { MediaInfo, MediaFormat } from '../types';
+import { MediaInfo, MediaFormat, PlaylistInfo, PlaylistItem } from '../types';
 import { getYtDlpPath } from './dependency-manager';
 
-function formatDuration(seconds: number): string {
+export function formatDuration(seconds: number): string {
   if (!seconds || isNaN(seconds)) return '0:00';
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -14,6 +14,17 @@ function formatDuration(seconds: number): string {
     return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   }
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+export function isPlaylistUrl(url: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  const lower = url.toLowerCase();
+  return (
+    lower.includes('list=') ||
+    lower.includes('/playlist') ||
+    lower.includes('/sets/') ||
+    lower.includes('/album/')
+  );
 }
 
 function parseFormat(f: Record<string, unknown>): MediaFormat {
@@ -99,7 +110,6 @@ export function analyzeUrl(url: string): Promise<MediaInfo> {
     proc.on('close', (code) => {
       if (code !== 0) {
         const errorMsg = stderr.trim() || 'Failed to analyze URL';
-        // Provide user-friendly error messages
         if (errorMsg.includes('is not a valid URL')) {
           reject(new Error('The provided URL is not valid'));
         } else if (errorMsg.includes('Unsupported URL')) {
@@ -122,12 +132,10 @@ export function analyzeUrl(url: string): Promise<MediaInfo> {
         const data = JSON.parse(stdout);
         const allFormats = (data.formats || []).map((f: Record<string, unknown>) => parseFormat(f));
 
-        // Filter to usable formats: those with video+audio, or video-only for merging
         const videoFormats = allFormats
           .filter((f: MediaFormat) => f.hasVideo)
           .sort((a: MediaFormat, b: MediaFormat) => (b.height || 0) - (a.height || 0));
 
-        // Deduplicate by resolution and extension
         const seen = new Set<string>();
         const uniqueFormats = videoFormats.filter((f: MediaFormat) => {
           const key = `${f.resolution}-${f.ext}`;
@@ -144,7 +152,6 @@ export function analyzeUrl(url: string): Promise<MediaInfo> {
             return bSize - aSize;
           });
 
-        // Deduplicate audio by extension
         const seenAudio = new Set<string>();
         const uniqueAudio = audioFormats.filter((f: MediaFormat) => {
           if (seenAudio.has(f.ext)) return false;
@@ -165,10 +172,11 @@ export function analyzeUrl(url: string): Promise<MediaInfo> {
           formats: uniqueFormats,
           audioFormats: uniqueAudio,
           bestFormat: uniqueFormats.length > 0 ? uniqueFormats[0] : null,
+          isPlaylist: isPlaylistUrl(url),
         };
 
         resolve(info);
-      } catch (parseError) {
+      } catch {
         reject(new Error('Failed to parse media information'));
       }
     });
@@ -179,6 +187,98 @@ export function analyzeUrl(url: string): Promise<MediaInfo> {
       } else {
         reject(new Error('Failed to run yt-dlp: ' + err.message));
       }
+    });
+  });
+}
+
+export function analyzePlaylist(url: string): Promise<PlaylistInfo> {
+  return new Promise((resolve, reject) => {
+    const ytdlpPath = getYtDlpPath();
+    const args = [
+      '--flat-playlist',
+      '--dump-single-json',
+      '--no-warnings',
+      url,
+    ];
+
+    const proc = spawn(ytdlpPath, args, {
+      windowsHide: true,
+      timeout: 120000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+
+    proc.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        const errorMsg = stderr.trim() || 'Failed to analyze playlist';
+        reject(new Error(errorMsg.substring(0, 300)));
+        return;
+      }
+
+      try {
+        const data = JSON.parse(stdout);
+        const rawEntries: Record<string, unknown>[] = Array.isArray(data.entries) ? data.entries : [];
+
+        const videos: PlaylistItem[] = rawEntries.map((e, index) => {
+          const id = (e.id as string) || `video-${index + 1}`;
+          const duration = typeof e.duration === 'number' ? e.duration : 0;
+          let entryUrl = (e.url as string) || '';
+          if (!entryUrl || !entryUrl.startsWith('http')) {
+            entryUrl = `https://www.youtube.com/watch?v=${id}`;
+          }
+
+          let thumb = (e.thumbnail as string) || '';
+          if (!thumb && Array.isArray(e.thumbnails) && e.thumbnails.length > 0) {
+            const lastThumb = e.thumbnails[e.thumbnails.length - 1];
+            if (lastThumb && typeof lastThumb.url === 'string') {
+              thumb = lastThumb.url;
+            }
+          }
+
+          return {
+            id,
+            title: (e.title as string) || `Track #${index + 1}`,
+            duration,
+            durationFormatted: formatDuration(duration),
+            thumbnail: thumb,
+            url: entryUrl,
+            uploader: (e.uploader as string) || (e.channel as string) || '',
+          };
+        });
+
+        let playlistThumb = (data.thumbnail as string) || '';
+        if (!playlistThumb && videos.length > 0 && videos[0].thumbnail) {
+          playlistThumb = videos[0].thumbnail;
+        }
+
+        const playlist: PlaylistInfo = {
+          id: (data.id as string) || uuidv4(),
+          title: (data.title as string) || 'YouTube Playlist',
+          thumbnail: playlistThumb,
+          uploader: (data.uploader as string) || (data.channel as string) || '',
+          videoCount: videos.length,
+          videos,
+          webpageUrl: (data.webpage_url as string) || url,
+        };
+
+        resolve(playlist);
+      } catch {
+        reject(new Error('Failed to parse playlist details'));
+      }
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error('Failed to run yt-dlp: ' + err.message));
     });
   });
 }

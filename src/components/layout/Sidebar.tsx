@@ -1,11 +1,12 @@
 import React from 'react';
-import { Home, Download, Clock, Settings, ArrowDownToLine } from 'lucide-react';
+import { Home, Download, Clock, Settings, ArrowDownToLine, RefreshCw } from 'lucide-react';
 import { useAppStore } from '../../stores/app-store';
 import type { Page } from '../../types';
 
 const navItems: { page: Page; icon: React.ElementType; label: string }[] = [
   { page: 'home', icon: Home, label: 'Home' },
   { page: 'downloads', icon: Download, label: 'Downloads' },
+  { page: 'converter', icon: RefreshCw, label: 'Convertisseur' },
   { page: 'history', icon: Clock, label: 'History' },
   { page: 'settings', icon: Settings, label: 'Settings' },
 ];
@@ -14,8 +15,14 @@ export const Sidebar: React.FC = () => {
   const currentPage = useAppStore((s) => s.currentPage);
   const setCurrentPage = useAppStore((s) => s.setCurrentPage);
   const downloads = useAppStore((s) => s.downloads);
+  const ffmpegJobs = useAppStore((s) => s.ffmpegJobs);
+
   const activeCount = downloads.filter(
     (d) => d.status === 'downloading' || d.status === 'queued' || d.status === 'processing'
+  ).length;
+
+  const activeConversionCount = ffmpegJobs.filter(
+    (j) => j.status === 'processing' || j.status === 'queued'
   ).length;
 
   return (
@@ -35,6 +42,8 @@ export const Sidebar: React.FC = () => {
       <nav className="flex-1 px-3 py-2 space-y-1">
         {navItems.map(({ page, icon: Icon, label }) => {
           const isActive = currentPage === page;
+          const badgeCount = page === 'downloads' ? activeCount : page === 'converter' ? activeConversionCount : 0;
+
           return (
             <button
               key={page}
@@ -48,9 +57,9 @@ export const Sidebar: React.FC = () => {
             >
               <Icon className="h-5 w-5 flex-shrink-0" />
               <span>{label}</span>
-              {page === 'downloads' && activeCount > 0 && (
+              {badgeCount > 0 && (
                 <span className="ml-auto bg-accent text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[1.25rem] text-center">
-                  {activeCount}
+                  {badgeCount}
                 </span>
               )}
             </button>

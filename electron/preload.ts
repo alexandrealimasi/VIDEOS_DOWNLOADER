@@ -9,13 +9,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Media info
   analyzeUrl: (url: string) => ipcRenderer.invoke('analyze-url', url),
+  analyzePlaylist: (url: string) => ipcRenderer.invoke('analyze-playlist', url),
 
   // Downloads
   startDownload: (options: Record<string, unknown>) => ipcRenderer.invoke('start-download', options),
+  startPlaylistDownload: (options: Record<string, unknown>, items: unknown[]) =>
+    ipcRenderer.invoke('start-playlist-download', options, items),
   pauseDownload: (id: string) => ipcRenderer.invoke('pause-download', id),
   resumeDownload: (id: string) => ipcRenderer.invoke('resume-download', id),
   cancelDownload: (id: string) => ipcRenderer.invoke('cancel-download', id),
   retryDownload: (id: string) => ipcRenderer.invoke('retry-download', id),
+  removeDownload: (id: string) => ipcRenderer.invoke('remove-download', id),
+  clearCompletedDownloads: () => ipcRenderer.invoke('clear-completed-downloads'),
   getActiveDownloads: () => ipcRenderer.invoke('get-active-downloads'),
 
   // Download progress events - returns unsubscribe function
@@ -35,6 +40,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => { ipcRenderer.removeListener('download-error', handler); };
   },
 
+  // FFmpeg conversion
+  convertFile: (options: Record<string, unknown>) => ipcRenderer.invoke('convert-file', options),
+  cancelConversion: (id: string) => ipcRenderer.invoke('cancel-conversion', id),
+  onFfmpegProgress: (callback: (data: Record<string, unknown>) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: Record<string, unknown>) => callback(data);
+    ipcRenderer.on('ffmpeg-progress', handler);
+    return () => { ipcRenderer.removeListener('ffmpeg-progress', handler); };
+  },
+  onFfmpegComplete: (callback: (data: Record<string, unknown>) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: Record<string, unknown>) => callback(data);
+    ipcRenderer.on('ffmpeg-complete', handler);
+    return () => { ipcRenderer.removeListener('ffmpeg-complete', handler); };
+  },
+
+  // External URL trigger (e.g., from browser extension / custom protocol)
+  onExternalUrlReceived: (callback: (url: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, url: string) => callback(url);
+    ipcRenderer.on('external-url-received', handler);
+    return () => { ipcRenderer.removeListener('external-url-received', handler); };
+  },
+
   // History
   getHistory: () => ipcRenderer.invoke('get-history'),
   addHistoryItem: (item: Record<string, unknown>) => ipcRenderer.invoke('add-history-item', item),
@@ -48,9 +74,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // File system
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+  selectFile: () => ipcRenderer.invoke('select-file'),
   openFile: (filePath: string) => ipcRenderer.invoke('open-file', filePath),
   openFolder: (filePath: string) => ipcRenderer.invoke('open-folder', filePath),
   getDefaultDownloadPath: () => ipcRenderer.invoke('get-default-download-path'),
+  openExtensionFolder: () => ipcRenderer.invoke('open-extension-folder'),
 
   // App info
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),

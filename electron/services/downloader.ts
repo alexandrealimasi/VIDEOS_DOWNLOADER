@@ -3,9 +3,9 @@
 import { spawn, ChildProcess } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
 import * as path from 'path';
-import { BrowserWindow } from 'electron';
-import { DownloadJob, DownloadOptions, DownloadStatus, HistoryItem } from '../types';
-import { getYtDlpPath } from './dependency-manager';
+import { BrowserWindow, Notification } from 'electron';
+import { DownloadJob, DownloadOptions, DownloadStatus, HistoryItem, PlaylistItem } from '../types';
+import { getYtDlpPath, getFfmpegLocation } from './dependency-manager';
 import { sanitizeFilename, verifyFileExists, getUniqueFilename, ensureDirSync } from './file-manager';
 
 // Progress parsing patterns for yt-dlp stderr output
@@ -13,9 +13,10 @@ const PROGRESS_REGEX = /\[download\]\s+(\d+\.?\d*)%\s+of\s+~?\s*([\d.]+\s*\w+)\s
 const PROGRESS_SIMPLE = /\[download\]\s+(\d+\.?\d*)%/;
 const DESTINATION_REGEX = /\[download\]\s+Destination:\s+(.+)/;
 const ALREADY_DOWNLOADED = /\[download\]\s+(.+)\s+has already been downloaded/;
-const MERGER_REGEX = /\[Merger\]\s+Merging formats into/;
+const MERGER_REGEX = /\[Merger\]\s+Merging formats into\s+["']?([^"']+)["']?/;
 const FFMPEG_REGEX = /\[ExtractAudio\]\s+Destination:\s+(.+)/;
-const DOWNLOAD_COMPLETE = /\[download\]\s+100%/;
+const REMUX_REGEX = /\[VideoRemuxer\]\s+Remuxing video from .* to ["']?([^"']+)["']?/;
+const ERROR_REGEX = /ERROR:\s+(.+)/;
 
 export class DownloaderService {
   private jobs: Map<string, DownloadJob> = new Map();
@@ -52,7 +53,7 @@ export class DownloaderService {
   startDownload(options: DownloadOptions): DownloadJob {
     const id = uuidv4();
     const sanitizedTitle = sanitizeFilename(options.title);
-    const ext = options.audioOnly ? 'mp3' : options.ext;
+    const ext = options.audioOnly ? (options.ext || 'mp3') : (options.ext || 'mp4');
 
     ensureDirSync(options.outputPath);
     const filePath = getUniqueFilename(options.outputPath, sanitizedTitle, ext);
@@ -66,6 +67,7 @@ export class DownloaderService {
       quality: options.quality,
       ext,
       audioOnly: options.audioOnly,
+      audioBitrate: options.audioBitrate || '320k',
       outputPath: options.outputPath,
       filename: path.basename(filePath),
       status: 'queued',
@@ -85,6 +87,21 @@ export class DownloaderService {
     this.sendProgress(job);
 
     return job;
+  }
+
+  startPlaylistDownload(options: DownloadOptions, items: PlaylistItem[]): DownloadJob[] {
+    const jobs: DownloadJob[] = [];
+    for (const item of items) {
+      const jobOptions: DownloadOptions = {
+        ...options,
+        url: item.url,
+        title: item.title,
+        thumbnail: item.thumbnail || options.thumbnail,
+      };
+      const job = this.startDownload(jobOptions);
+      jobs.push(job);
+    }
+    return jobs;
   }
 
   private processQueue() {
@@ -109,13 +126,67 @@ export class DownloaderService {
     const args: string[] = [];
 
     if (job.audioOnly) {
-      args.push('--extract-audio', '--audio-format', 'mp3', '--audio-quality', '0');
-    } else {
-      // Select format
-      if (job.format && job.format !== 'best') {
-        args.push('-f', job.format);
+      const audioFormat = job.ext === 'ogg' ? 'vorbis' : job.ext;
+      const bitrate = job.audioBitrate || '320k';
+      args.push('--extract-audio', '--audio-format', audioFormat, '--audio-quality', bitrate);
+      if (job.format && job.format !== 'best' && !job.format.includes('+')) {
+        args.push('-f', `${job.format}/bestaudio/best`);
       } else {
-        args.push('-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best');
+        args.push('-f', 'bestaudio/best');
+      }
+    } else {
+      // Resolution filtering if requested
+      const heightMatch = job.quality ? job.quality.match(/^(\d+)p/) : null;
+      const targetHeight = heightMatch ? heightMatch[1] : null;
+
+      if (job.format && job.format !== 'best') {
+        if (job.format.includes('+')) {
+          args.push('-f', job.format);
+        } else if (job.ext === 'mp4') {
+          args.push('-f', `${job.format}+bestaudio[ext=m4a]/${job.format}+bestaudio/bestvideo+bestaudio/${job.format}/best`);
+          args.push('--merge-output-format', 'mp4');
+        } else if (job.ext === 'webm') {
+          args.push('-f', `${job.format}+bestaudio[ext=webm]/${job.format}+bestaudio/bestvideo+bestaudio/${job.format}/best`);
+          args.push('--merge-output-format', 'webm');
+        } else if (job.ext === 'mkv') {
+          args.push('-f', `${job.format}+bestaudio/bestvideo+bestaudio/${job.format}/best`);
+          args.push('--merge-output-format', 'mkv');
+        } else if (job.ext === 'mov' || job.ext === 'avi') {
+          args.push('-f', `${job.format}+bestaudio/bestvideo+bestaudio/${job.format}/best`);
+          args.push('--remux-video', job.ext);
+        } else {
+          args.push('-f', `${job.format}+bestaudio/bestvideo+bestaudio/${job.format}/best`);
+          if (job.ext) {
+            args.push('--merge-output-format', job.ext);
+          }
+        }
+      } else {
+        // Dynamic resolution selection
+        const resSelector = targetHeight
+          ? `bestvideo[height<=${targetHeight}]+bestaudio/best[height<=${targetHeight}]/best`
+          : 'bestvideo+bestaudio/best';
+
+        if (job.ext === 'mp4') {
+          const mp4Selector = targetHeight
+            ? `bestvideo[height<=${targetHeight}][ext=mp4]+bestaudio[ext=m4a]/${resSelector}`
+            : 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best';
+          args.push('-f', mp4Selector);
+          args.push('--merge-output-format', 'mp4');
+        } else if (job.ext === 'mkv') {
+          args.push('-f', resSelector);
+          args.push('--merge-output-format', 'mkv');
+        } else if (job.ext === 'webm') {
+          args.push('-f', resSelector);
+          args.push('--merge-output-format', 'webm');
+        } else if (job.ext === 'mov' || job.ext === 'avi') {
+          args.push('-f', resSelector);
+          args.push('--remux-video', job.ext);
+        } else {
+          args.push('-f', resSelector);
+          if (job.ext) {
+            args.push('--merge-output-format', job.ext);
+          }
+        }
       }
     }
 
@@ -132,8 +203,11 @@ export class DownloaderService {
     // Don't overwrite
     args.push('--no-overwrites');
 
-    // FFmpeg location if available
-    args.push('--ffmpeg-location', 'ffmpeg');
+    // FFmpeg location if custom local path exists; otherwise yt-dlp automatically resolves from PATH
+    const ffmpegLocation = getFfmpegLocation();
+    if (ffmpegLocation) {
+      args.push('--ffmpeg-location', ffmpegLocation);
+    }
 
     // Add URL last
     args.push(job.url);
@@ -157,6 +231,12 @@ export class DownloaderService {
         const trimmed = line.trim();
         if (!trimmed) continue;
 
+        // Check for error
+        const errorMatch = trimmed.match(ERROR_REGEX);
+        if (errorMatch) {
+          job.error = errorMatch[1].trim();
+        }
+
         // Check for destination
         const destMatch = trimmed.match(DESTINATION_REGEX);
         if (destMatch) {
@@ -173,8 +253,21 @@ export class DownloaderService {
           continue;
         }
 
+        // Check for remux
+        const remuxMatch = trimmed.match(REMUX_REGEX);
+        if (remuxMatch) {
+          lastOutputFile = remuxMatch[1].trim();
+          job.status = 'processing';
+          this.sendProgress(job);
+          continue;
+        }
+
         // Check for merge
-        if (MERGER_REGEX.test(trimmed)) {
+        const mergerMatch = trimmed.match(MERGER_REGEX);
+        if (mergerMatch) {
+          if (mergerMatch[1]) {
+            lastOutputFile = mergerMatch[1].trim();
+          }
           job.status = 'processing';
           job.progress = 99;
           this.sendProgress(job);
@@ -239,7 +332,7 @@ export class DownloaderService {
         }
         // Try without extension variants
         const withoutExt = candidate.replace(/\.[^.]+$/, '');
-        for (const ext of ['mp4', 'webm', 'mkv', 'mp3', 'm4a', 'flac', 'wav', 'opus']) {
+        for (const ext of ['mp4', 'webm', 'mkv', 'mov', 'avi', 'mp3', 'm4a', 'flac', 'wav', 'opus', 'aac', 'ogg']) {
           const variant = `${withoutExt}.${ext}`;
           const vResult = await verifyFileExists(variant);
           if (vResult.exists) {
@@ -259,6 +352,13 @@ export class DownloaderService {
         job.completedAt = new Date().toISOString();
         job.error = null;
 
+        if (Notification.isSupported()) {
+          new Notification({
+            title: 'Téléchargement terminé',
+            body: job.title,
+          }).show();
+        }
+
         this.mainWindow?.webContents.send('download-complete', {
           id: job.id,
           filePath: foundFile,
@@ -268,6 +368,13 @@ export class DownloaderService {
       } else {
         job.status = 'failed';
         job.error = job.error || 'Download failed. The file could not be verified.';
+
+        if (Notification.isSupported()) {
+          new Notification({
+            title: 'Échec du téléchargement',
+            body: `${job.title} : ${job.error}`,
+          }).show();
+        }
 
         this.mainWindow?.webContents.send('download-error', {
           id: job.id,
@@ -287,6 +394,13 @@ export class DownloaderService {
         job.error = 'yt-dlp is not installed or not found on PATH';
       } else {
         job.error = err.message;
+      }
+
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'Erreur lors du téléchargement',
+          body: job.error,
+        }).show();
       }
 
       this.mainWindow?.webContents.send('download-error', {
@@ -336,15 +450,24 @@ export class DownloaderService {
       quality: oldJob.quality,
       ext: oldJob.ext,
       audioOnly: oldJob.audioOnly,
+      audioBitrate: oldJob.audioBitrate,
       outputPath: oldJob.outputPath,
       title: oldJob.title,
       thumbnail: oldJob.thumbnail,
     });
   }
 
-  removeJob(id: string) {
+  removeJob(id: string): boolean {
     this.cancelDownload(id);
-    this.jobs.delete(id);
+    return this.jobs.delete(id);
+  }
+
+  clearCompleted(): void {
+    for (const [id, job] of this.jobs.entries()) {
+      if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+        this.jobs.delete(id);
+      }
+    }
   }
 
   getCompletedAsHistory(): HistoryItem[] {
@@ -392,6 +515,7 @@ export class DownloaderService {
       quality: job.quality,
       ext: job.ext,
       audioOnly: job.audioOnly,
+      audioBitrate: job.audioBitrate,
       outputPath: job.outputPath,
       filename: job.filename,
       error: job.error,

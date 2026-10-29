@@ -4,6 +4,7 @@ import { ipcMain, BrowserWindow } from 'electron';
 import { downloaderService } from '../services/downloader';
 import { validateDownloadOptions } from '../security/input-validator';
 import { isValidUrl } from '../security/url-validator';
+import { PlaylistItem } from '../types';
 
 export function registerDownloadHandlers(_mainWindow: BrowserWindow) {
   downloaderService.setMainWindow(_mainWindow);
@@ -28,9 +29,29 @@ export function registerDownloadHandlers(_mainWindow: BrowserWindow) {
     return { id: job.id };
   });
 
+  ipcMain.handle('start-playlist-download', async (_event, options: unknown, items: unknown) => {
+    const validation = validateDownloadOptions(options);
+    if (!validation.valid || !validation.data) {
+      throw new Error(validation.error || 'Invalid download options');
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new Error('No playlist items provided');
+    }
+
+    const validItems: PlaylistItem[] = items.filter(
+      (it) => it && typeof it.url === 'string' && typeof it.title === 'string'
+    );
+
+    if (validItems.length === 0) {
+      throw new Error('No valid videos found in playlist');
+    }
+
+    const jobs = downloaderService.startPlaylistDownload(validation.data, validItems);
+    return { ids: jobs.map((j) => j.id) };
+  });
+
   ipcMain.handle('pause-download', async (_event, id: string) => {
-    // yt-dlp does not natively support pause/resume mid-stream.
-    // We cancel and the user can retry (yt-dlp supports resuming partial files with --continue)
     if (typeof id !== 'string') throw new Error('Invalid ID');
     downloaderService.cancelDownload(id);
   });
@@ -53,6 +74,15 @@ export function registerDownloadHandlers(_mainWindow: BrowserWindow) {
     const job = downloaderService.retryDownload(id);
     if (!job) throw new Error('Cannot retry this download');
     return { id: job.id };
+  });
+
+  ipcMain.handle('remove-download', async (_event, id: string) => {
+    if (typeof id !== 'string') throw new Error('Invalid ID');
+    downloaderService.removeJob(id);
+  });
+
+  ipcMain.handle('clear-completed-downloads', async () => {
+    downloaderService.clearCompleted();
   });
 
   ipcMain.handle('get-active-downloads', async () => {

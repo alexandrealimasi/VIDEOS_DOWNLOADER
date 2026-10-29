@@ -11,6 +11,27 @@ export interface MediaInfo {
   formats: MediaFormat[];
   audioFormats: MediaFormat[];
   bestFormat: MediaFormat | null;
+  isPlaylist?: boolean;
+}
+
+export interface PlaylistItem {
+  id: string;
+  title: string;
+  duration: number;
+  durationFormatted: string;
+  thumbnail: string;
+  url: string;
+  uploader?: string;
+}
+
+export interface PlaylistInfo {
+  id: string;
+  title: string;
+  thumbnail: string;
+  uploader: string;
+  videoCount: number;
+  videos: PlaylistItem[];
+  webpageUrl: string;
 }
 
 export interface MediaFormat {
@@ -36,6 +57,7 @@ export interface DownloadOptions {
   quality: string;
   ext: string;
   audioOnly: boolean;
+  audioBitrate?: string;
   outputPath: string;
   title: string;
   thumbnail: string;
@@ -50,6 +72,7 @@ export interface DownloadJob {
   quality: string;
   ext: string;
   audioOnly: boolean;
+  audioBitrate?: string;
   outputPath: string;
   filename: string;
   status: DownloadStatus;
@@ -109,9 +132,12 @@ export interface AppSettings {
   maxConcurrentDownloads: number;
   preferredFormat: string;
   preferredQuality: string;
+  preferredAudioFormat?: string;
+  preferredAudioBitrate?: string;
   audioOnly: boolean;
   theme: 'dark' | 'light';
   autoLaunch: boolean;
+  enableClipboardWatcher?: boolean;
 }
 
 export interface DependencyInfo {
@@ -121,4 +147,31 @@ export interface DependencyInfo {
   path: string | null;
 }
 
-export type Page = 'home' | 'downloads' | 'history' | 'settings';
+export interface FfmpegConvertOptions {
+  inputPath: string;
+  outputPath?: string;
+  targetFormat: string;
+  audioOnly: boolean;
+  audioBitrate?: string;
+  resolution?: string;
+}
+
+export interface FfmpegJob {
+  id: string;
+  inputPath: string;
+  outputPath: string;
+  filename: string;
+  targetFormat: string;
+  audioOnly: boolean;
+  audioBitrate?: string;
+  resolution?: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
+  progress: number;
+  speed: string;
+  time: string;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export type Page = 'home' | 'downloads' | 'converter' | 'history' | 'settings';
