@@ -162,10 +162,10 @@ export const SettingsPage: React.FC = () => {
                 value={String(settings.maxConcurrentDownloads)}
                 onChange={(e) => saveSettings({ maxConcurrentDownloads: parseInt(e.target.value, 10) })}
                 options={[
-                  { value: '1', label: '1 Téléchargement à la fois' },
+                  { value: '1', label: '1 Téléchargement à la fois (Un par un - Recommandé)' },
                   { value: '2', label: '2 Téléchargements simultanés' },
-                  { value: '3', label: '3 Simultanés (Recommandé)' },
-                  { value: '5', label: '5 Simultanés' },
+                  { value: '3', label: '3 Téléchargements simultanés' },
+                  { value: '5', label: '5 Téléchargements simultanés' },
                 ]}
               />
             </div>

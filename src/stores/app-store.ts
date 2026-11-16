@@ -177,7 +177,7 @@ export const useAppStore = create<AppState>((set) => ({
   // Settings
   settings: {
     downloadPath: '',
-    maxConcurrentDownloads: 3,
+    maxConcurrentDownloads: 1,
     preferredFormat: 'mp4',
     preferredQuality: '1080p',
     preferredAudioFormat: 'mp3',

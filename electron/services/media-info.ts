@@ -87,6 +87,10 @@ export function analyzeUrl(url: string): Promise<MediaInfo> {
       '--no-download',
       '--no-warnings',
       '--no-playlist',
+      '--js-runtimes',
+      'node',
+      '--remote-components',
+      'ejs:github',
       url,
     ];
 
@@ -198,6 +202,10 @@ export function analyzePlaylist(url: string): Promise<PlaylistInfo> {
       '--flat-playlist',
       '--dump-single-json',
       '--no-warnings',
+      '--js-runtimes',
+      'node',
+      '--remote-components',
+      'ejs:github',
       url,
     ];
 

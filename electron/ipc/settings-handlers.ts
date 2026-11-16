@@ -10,7 +10,7 @@ import { downloaderService } from '../services/downloader';
 
 const DEFAULT_SETTINGS: AppSettings = {
   downloadPath: app.getPath('downloads'),
-  maxConcurrentDownloads: 3,
+  maxConcurrentDownloads: 1,
   preferredFormat: 'mp4',
   preferredQuality: '1080p',
   audioOnly: false,
@@ -30,6 +30,10 @@ export function getStore() {
 }
 
 export function registerSettingsHandlers(mainWindow: BrowserWindow) {
+  // Synchronize downloaderService with persisted or default settings
+  const currentSettings = store.get('settings', DEFAULT_SETTINGS);
+  downloaderService.setMaxConcurrent(currentSettings.maxConcurrentDownloads ?? 1);
+
   ipcMain.handle('get-settings', async () => {
     const settings = store.get('settings', DEFAULT_SETTINGS);
     // Ensure downloadPath exists as a valid path

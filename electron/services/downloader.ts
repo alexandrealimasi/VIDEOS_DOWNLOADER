@@ -22,7 +22,7 @@ export class DownloaderService {
   private jobs: Map<string, DownloadJob> = new Map();
   private processes: Map<string, ChildProcess> = new Map();
   private mainWindow: BrowserWindow | null = null;
-  private maxConcurrent = 3;
+  private maxConcurrent = 1; // Default to 1 (download one by one)
 
   setMainWindow(window: BrowserWindow) {
     this.mainWindow = window;
@@ -190,6 +190,21 @@ export class DownloaderService {
       }
     }
 
+    // Speed & performance optimizations:
+    // 1. Parallel fragment downloads for DASH/HLS streams (up to 16 concurrent fragments)
+    // 2. Larger buffer and HTTP chunk size to avoid server throttling
+    // 3. Auto retry and throttled rate recovery
+    // 4. JS runtime & challenge solvers for uncapped YouTube speeds
+    args.push('--concurrent-fragments', '16');
+    args.push('--buffer-size', '1024K');
+    args.push('--http-chunk-size', '10M');
+    args.push('--throttled-rate', '100K');
+    args.push('--retries', '10');
+    args.push('--fragment-retries', '10');
+    args.push('--file-access-retries', '3');
+    args.push('--js-runtimes', 'node');
+    args.push('--remote-components', 'ejs:github');
+
     // Output template
     args.push('-o', job.filePath!);
 
@@ -325,7 +340,7 @@ export class DownloaderService {
 
       for (const candidate of candidatePaths) {
         const result = await verifyFileExists(candidate);
-        if (result.exists) {
+        if (result?.exists) {
           foundFile = candidate;
           fileSize = result.size;
           break;
@@ -335,7 +350,7 @@ export class DownloaderService {
         for (const ext of ['mp4', 'webm', 'mkv', 'mov', 'avi', 'mp3', 'm4a', 'flac', 'wav', 'opus', 'aac', 'ogg']) {
           const variant = `${withoutExt}.${ext}`;
           const vResult = await verifyFileExists(variant);
-          if (vResult.exists) {
+          if (vResult?.exists) {
             foundFile = variant;
             fileSize = vResult.size;
             break;
